@@ -11,6 +11,9 @@
 # More info: <http://www.gnu.org/licenses/>
 # ─────────────────────────────────────────────────────────────────────────────
 
+#GITHUB=https://github.com/cmgonzalez/prisma.git #Origen https
+#GITHUB=https://github.com/metsuke/prisma-metsuos.git #metsuos-fork https
+GITHUB=git@github.com:metsuke/prisma-metsuos.git #metsuos-fork ssh
 
 # Script de instalación para PRISMA Framework en macOS
 # Este script sigue las instrucciones del texto de README, incluyendo la compilación de z88dk desde fuente
@@ -77,7 +80,7 @@ elif [ -f "prisma.zip" ]; then
   echo "✅ prisma.zip descomprimido en $SCRIPT_DIR/prisma."
 else
   echo "📥 Clonando el repositorio de PRISMA desde GitHub..."
-  git clone https://github.com/cmgonzalez/prisma.git || {
+  git clone $GITHUB || {
     echo "❌ Error al clonar el repositorio. Verifica tus credenciales de GitHub."
     echo "💡 Usa un token de acceso personal (PAT) o configura SSH. Instrucciones:"
     echo "  1. Genera un PAT en https://github.com/settings/tokens (con permisos 'repo')."
@@ -87,6 +90,8 @@ else
   }
   echo "✅ Repositorio clonado en $SCRIPT_DIR/prisma."
 fi
+
+[ -d prisma-metsuos ] && mv prisma-metsuos prisma && echo "Carpeta renombrada a prisma." || echo "Carpeta prisma-metsuos no existe."
 cd prisma
 
 # Paso 5: Crear carpeta build si no existe (para evitar errores en ARM64)
