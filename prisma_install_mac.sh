@@ -15,10 +15,16 @@
 #
 # Cambios realizados:
 # - Verificación de dependencias instaladas antes de instalar con Homebrew.
-# - Soporte para --refresh: reinstala dependencias y renombra carpeta prisma a prisma_old.
+# - Soporte para --refresh: reinstala dependencias y renombra carpetas prisma y z88dk.
 # - Mensajes mejorados para trazabilidad en commits de GitHub.
 # - Corrección de formato en mensajes: añadido espacio entre iconos y texto.
-# - Revisión adicional para garantizar formato consistente en todos los mensajes.
+# - Añadida impresión de la variable PATH activa para depuración.
+# - Corrección de error tipográfico en comentario (Paso SIX → Paso 6).
+# - Añadida instalación y configuración de Boost para resolver error de compilación de z88dk.
+# - Corrección para renombrar z88dk: elimina z88dk_old si existe con --refresh.
+# - Añadidas variables CFLAGS, CXXFLAGS, LDFLAGS para Boost en ARM64/Intel.
+# - Verificación explícita de boost/graph/adjacency_list.hpp antes de compilar z88dk.
+# - Ajustes en descarga de z88dk y su compilación recursiva
 # ─────────────────────────────────────────────────────────────────────────────
 
 #GITHUB=https://github.com/cmgonzalez/prisma.git #Origen https
@@ -31,7 +37,7 @@ set -e  # Salir si hay un error
 REFRESH=false
 if [ "$1" = "--refresh" ]; then
   REFRESH=true
-  echo "🔄 Modo --refresh activado: se reinstalarán dependencias y se renombrará la carpeta prisma si existe."
+  echo "🔄 Modo --refresh activado: se reinstalarán dependencias y se renombrarán las carpetas prisma y z88dk si existen."
 fi
 
 echo "🚀 Iniciando instalación de PRISMA Framework para macOS..."
@@ -39,16 +45,41 @@ echo "🚀 Iniciando instalación de PRISMA Framework para macOS..."
 # Obtener el directorio donde se encuentra el script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Imprimir la variable de entorno PATH activa
+echo "📍 Variable de entorno PATH activa: $PATH"
+
 # Función para verificar si un comando está instalado
 check_installed() {
   command -v "$1" >/dev/null 2>&1
 }
 
+# Función para verificar si Boost está instalado y tiene el archivo necesario
+check_boost_installed() {
+  if [ "$(uname -m)" = "arm64" ]; then
+    [ -f "/opt/homebrew/include/boost/graph/adjacency_list.hpp" ]
+  else
+    [ -f "/usr/local/include/boost/graph/adjacency_list.hpp" ]
+  fi
+}
+
+# Determinar la ruta de Boost según la arquitectura
+if [ "$(uname -m)" = "arm64" ]; then
+  BOOST_ROOT="/opt/homebrew"
+  BOOST_INCLUDE="/opt/homebrew/include"
+  BOOST_LIB="/opt/homebrew/lib"
+else
+  BOOST_ROOT="/usr/local"
+  BOOST_INCLUDE="/usr/local/include"
+  BOOST_LIB="/usr/local/lib"
+fi
+
 # Paso 1: Instalar dependencias externas con Homebrew
-echo "📦 Paso 1: Verificando e instalando dependencias con Homebrew (make, gcc, git, libpng)..."
-for pkg in make gcc git libpng; do
-  if check_installed "$pkg" && [ "$REFRESH" = false ]; then
+echo "📦 Paso 1: Verificando e instalando dependencias con Homebrew (make, gcc, git, libpng, boost)..."
+for pkg in make gcc git libpng boost; do
+  if check_installed "$pkg" && [ "$pkg" != "boost" ] && [ "$REFRESH" = false ]; then
     echo "ℹ️  $pkg ya está instalado, omitiendo instalación."
+  elif [ "$pkg" = "boost" ] && check_boost_installed && [ "$REFRESH" = false ]; then
+    echo "ℹ️  boost ya está instalado en $BOOST_ROOT, omitiendo instalación."
   else
     echo "📥 Instalando $pkg..."
     brew install "$pkg" || { echo "❌ Error al instalar $pkg."; exit 1; }
@@ -57,26 +88,45 @@ for pkg in make gcc git libpng; do
   fi
 done
 
-# Paso 2: Descargar y compilar z88dk desde fuente
-echo "🔧 Paso 2: Verificando y compilando z88dk desde fuente..."
+# Verificar explícitamente la presencia de boost/graph/adjacency_list.hpp
+echo "🔍 Verificando la presencia de boost/graph/adjacency_list.hpp..."
+if ! check_boost_installed; then
+  echo "❌ Error: boost/graph/adjacency_list.hpp no encontrado en $BOOST_INCLUDE."
+  echo "💡 Intenta reinstalar Boost con: brew reinstall boost"
+  exit 1
+fi
+echo "✅ boost/graph/adjacency_list.hpp encontrado en $BOOST_INCLUDE "
+
+# Paso 2: Clonar y compilar z88dk desde GitHub
+echo "🔧 Paso 2: Verificando y compilando z88dk desde GitHub..."
 cd ~
 if [ -d "z88dk" ] && [ "$REFRESH" = false ]; then
-  echo "ℹ️  z88dk ya está presente en ~/z88dk, omitiendo compilación."
+  echo "ℹ️ z88dk ya está presente en ~/z88dk, omitiendo clonación y compilación."
 else
   if [ -d "z88dk" ] && [ "$REFRESH" = true ]; then
+    if [ -d "z88dk_old" ]; then
+      echo "🗑️ Eliminando z88dk_old existente debido a --refresh..."
+      rm -rf z88dk_old || { echo "❌ Error al eliminar z88dk_old."; exit 1; }
+    fi
     echo "🔄 Renombrando z88dk a z88dk_old debido a --refresh..."
     mv z88dk z88dk_old || { echo "❌ Error al renombrar z88dk."; exit 1; }
   fi
-  echo "📥 Descargando z88dk-src-2.3..."
-  wget https://master.dl.sourceforge.net/project/z88dk/v2.3/z88dk-src-2.3.tgz -O z88dk-src-2.3.tgz || {
-    echo "❌ Error al descargar z88dk."; exit 1; }
-  tar -xzf z88dk-src-2.3.tgz
+  echo "📥 Clonando el repositorio de z88dk desde GitHub..."
+  git clone --recursive https://github.com/metsuke/z88dk-metsuos.git || {
+    echo "❌ Error al clonar el repositorio de z88dk. Verifica tu conexión o permisos."
+    exit 1
+  }
+  mv z88dk-metsuos z88dk
   cd z88dk
   export BUILD_SDCC=1
   export BUILD_SDCC_HTTP=1
+  export BOOST_ROOT="$BOOST_ROOT"
+  export CFLAGS="-I$BOOST_INCLUDE"
+  export CXXFLAGS="-I$BOOST_INCLUDE"
+  export LDFLAGS="-L$BOOST_LIB"
   chmod +x build.sh
-  ./build.sh || { echo "❌ Error al compilar z88dk."; exit 1; }
-  echo "✅ z88dk compilado exitosamente."
+  ./build.sh || { echo "❌ Error al compilar z88dk. Verifica el archivo config.log para más detalles."; exit 1; }
+  echo "✅ z88dk clonado y compilado exitosamente."
 fi
 
 # Paso 3: Configurar variables de entorno para z88dk y PRISMA
@@ -91,6 +141,10 @@ if ! grep -q "Z88DK" "$PROFILE_FILE"; then
     echo "export PATH=\$Z88DK/bin:\$PATH"
     echo "export Z80_OZFILES=\$Z88DK/lib"
     echo "export ZCCCFG=\$Z88DK/lib/config"
+    echo "export BOOST_ROOT=$BOOST_ROOT"
+    echo "export CFLAGS=\"-I$BOOST_INCLUDE \$CFLAGS\""
+    echo "export CXXFLAGS=\"-I$BOOST_INCLUDE \$CXXFLAGS\""
+    echo "export LDFLAGS=\"-L$BOOST_LIB \$LDFLAGS\""
   } >> "$PROFILE_FILE"
   source "$PROFILE_FILE"
   echo "✅ Variables de entorno configuradas en $PROFILE_FILE."
@@ -105,6 +159,10 @@ if [ -d "prisma" ] && [ "$REFRESH" = false ]; then
   echo "ℹ️  Carpeta prisma ya existe en $SCRIPT_DIR/prisma, omitiendo clonación/descompresión."
 else
   if [ -d "prisma" ] && [ "$REFRESH" = true ]; then
+    if [ -d "prisma_old" ]; then
+      echo "🗑️  Eliminando prisma_old existente debido a --refresh..."
+      rm -rf prisma_old || { echo "❌ Error al eliminar prisma_old."; exit 1; }
+    fi
     echo "🔄 Renombrando prisma a prisma_old debido a --refresh..."
     mv prisma prisma_old || { echo "❌ Error al renombrar prisma."; exit 1; }
   fi
@@ -134,7 +192,7 @@ echo "🛠️ Paso 5: Creando carpeta build si no existe..."
 mkdir -p build
 echo "✅ Carpeta build creada."
 
-# Paso SIX: Compilar las herramientas del framework
+# Paso 6: Compilar las herramientas del framework
 echo "🔨 Paso 6: Compilando las herramientas de PRISMA con 'make tools'..."
 make tools || { echo "❌ Error al compilar herramientas."; exit 1; }
 echo "✅ Herramientas compiladas."
